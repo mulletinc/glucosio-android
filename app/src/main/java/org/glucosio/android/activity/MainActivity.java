@@ -29,8 +29,8 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Typeface;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
+import android.support.annotation.DrawableRes;
 import android.support.design.widget.AppBarLayout;
 import android.support.design.widget.BottomSheetBehavior;
 import android.support.design.widget.BottomSheetDialog;
@@ -40,14 +40,13 @@ import android.support.design.widget.TabLayout;
 import android.support.graphics.drawable.VectorDrawableCompat;
 import android.support.v4.view.ViewPager;
 import android.support.v7.app.AlertDialog;
-import android.support.v7.app.AppCompatActivity;
+import android.support.v7.content.res.AppCompatResources;
 import android.support.v7.widget.Toolbar;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -71,31 +70,41 @@ import org.glucosio.android.db.DatabaseHandler;
 import org.glucosio.android.presenter.ExportPresenter;
 import org.glucosio.android.presenter.MainPresenter;
 import org.glucosio.android.tools.LocaleHelper;
+import org.glucosio.android.util.SnackbarUtil;
 import org.glucosio.android.view.ExportView;
 
 import java.util.Calendar;
 
+import butterknife.BindView;
+import butterknife.OnClick;
+import butterknife.OnPageChange;
 import uk.co.chrisjenx.calligraphy.CalligraphyContextWrapper;
 
 
-public class MainActivity extends AppCompatActivity implements DatePickerDialog.OnDateSetListener, ExportView {
+public class MainActivity extends BoundActivity implements DatePickerDialog.OnDateSetListener, ExportView {
 
     private static final String INTENT_EXTRA_DROPDOWN = "history_dropdown";
     private static final int REQUEST_INVITE = 1;
     private static final String INTENT_EXTRA_PAGER = "pager";
 
+    @BindView(android.R.id.content) View content;
+    @BindView(R.id.activity_main_toolbar) Toolbar toolbar;
+    @BindView(R.id.activity_main_pager) ViewPager viewPager;
+    @BindView(R.id.activity_main_tab_layout) TabLayout tabLayout;
+    @BindView(R.id.activity_main_fab_add_reading) FloatingActionButton fabAddReading;
+    @BindView(R.id.activity_main_empty_layout) View emptyLayout;
+
     private BottomSheetBehavior bottomSheetBehavior;
     private ExportPresenter exportPresenter;
-    private RadioButton exportRangeButton;
     private HomePagerAdapter homePagerAdapter;
     private MainPresenter presenter;
-    private ViewPager viewPager;
     private BottomSheetDialog bottomSheetAddDialog;
+    private View bottomSheetAddDialogView;
+    private LocaleHelper localeHelper;
+
+    private RadioButton exportRangeButton;
     private TextView exportDialogDateFrom;
     private TextView exportDialogDateTo;
-    private View bottomSheetAddDialogView;
-    private TabLayout tabLayout;
-    private LocaleHelper localeHelper;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -106,10 +115,23 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
         initPresenters(application);
         setContentView(R.layout.activity_main);
 
-        Toolbar toolbar = (Toolbar) findViewById(R.id.activity_main_toolbar);
-        tabLayout = (TabLayout) findViewById(R.id.activity_main_tab_layout);
-        viewPager = (ViewPager) findViewById(R.id.activity_main_pager);
+        setupToolbar();
+        setupPagerAdapter();
+        setupTabLayout();
+        setupNavDrawer();
 
+        checkIfEmptyLayout();
+        setupBottomSheet();
+
+        setupAnalytics(application);
+
+        Bundle b = getIntent().getExtras();
+        if (b != null) {
+            viewPager.setCurrentItem(b.getInt("pager"));
+        }
+    }
+
+    private void setupToolbar() {
         if (toolbar != null) {
             setSupportActionBar(toolbar);
             getSupportActionBar().setDisplayHomeAsUpEnabled(false);
@@ -117,10 +139,14 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
             getSupportActionBar().setTitle("");
             getSupportActionBar().setLogo(R.drawable.ic_logo);
         }
+    }
 
+    private void setupPagerAdapter() {
         homePagerAdapter = new HomePagerAdapter(getSupportFragmentManager(), getApplicationContext());
-
         viewPager.setAdapter(homePagerAdapter);
+    }
+
+    private void setupTabLayout() {
         tabLayout.setupWithViewPager(viewPager);
         tabLayout.addOnTabSelectedListener(
                 new TabLayout.ViewPagerOnTabSelectedListener(viewPager) {
@@ -129,45 +155,29 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
                         super.onTabSelected(tab);
                     }
                 });
+    }
 
-        viewPager.addOnPageChangeListener(new ViewPager.OnPageChangeListener() {
-            @Override
-            public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) {
+    @OnPageChange(value = R.id.activity_main_pager, callback = OnPageChange.Callback.PAGE_SELECTED)
+    public void onViewPagerPageSelected(int position) {
+        if (position == 2) {
+            hideFabAnimation();
+            if (viewPager.getVisibility() == View.GONE) {
+                viewPager.setVisibility(View.VISIBLE);
+                emptyLayout.setVisibility(View.INVISIBLE);
             }
+        } else {
+            showFabAnimation();
+            checkIfEmptyLayout();
+        }
+    }
 
-            @Override
-            public void onPageSelected(int position) {
-                if (position == 2) {
-                    hideFabAnimation();
-                    LinearLayout emptyLayout = (LinearLayout) findViewById(R.id.activity_main_empty_layout);
-                    ViewPager pager = (ViewPager) findViewById(R.id.activity_main_pager);
-                    if (pager.getVisibility() == View.GONE) {
-                        pager.setVisibility(View.VISIBLE);
-                        emptyLayout.setVisibility(View.INVISIBLE);
-                    }
-                } else {
-                    showFabAnimation();
-                    checkIfEmptyLayout();
-                }
-            }
+    @OnClick(R.id.activity_main_fab_add_reading)
+    public void onFabAddReadingClick() {
+        bottomSheetAddDialog.show();
+        bottomSheetBehavior.setState(BottomSheetBehavior.STATE_EXPANDED);
+    }
 
-            @Override
-            public void onPageScrollStateChanged(int state) {
-
-            }
-        });
-
-        FloatingActionButton fabAddReading = (FloatingActionButton) findViewById(R.id.activity_main_fab_add_reading);
-        fabAddReading.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                bottomSheetAddDialog.show();
-                bottomSheetBehavior.setState(BottomSheetBehavior.STATE_EXPANDED);
-            }
-        });
-
-        bottomSheetAddDialog = new BottomSheetDialog(this);
-
+    private void setupNavDrawer() {
         // Add Nav Drawer
         final PrimaryDrawerItem itemSettings = new PrimaryDrawerItem().withName(R.string.action_settings).withIcon(VectorDrawableCompat.create(getResources(), R.drawable.ic_settings_grey_24dp, null)).withSelectable(false).withTypeface(Typeface.DEFAULT_BOLD);
         final PrimaryDrawerItem itemExport = new PrimaryDrawerItem().withName(R.string.sidebar_backup_export).withIcon(VectorDrawableCompat.create(getResources(), R.drawable.ic_backup_grey_24dp, null)).withSelectable(false).withTypeface(Typeface.DEFAULT_BOLD);
@@ -244,18 +254,16 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
                     .withSelectedItem(-1)
                     .build();
         }
+    }
 
-        // Restore pager position
-        Bundle b = getIntent().getExtras();
-        if (b != null) {
-            viewPager.setCurrentItem(b.getInt("pager"));
-        }
-
-        checkIfEmptyLayout();
+    private void setupBottomSheet() {
+        bottomSheetAddDialog = new BottomSheetDialog(this);
         bottomSheetAddDialog.setContentView(bottomSheetAddDialogView);
         bottomSheetBehavior = BottomSheetBehavior.from((View) bottomSheetAddDialogView.getParent());
         bottomSheetBehavior.setHideable(false);
+    }
 
+    private void setupAnalytics(GlucosioApplication application) {
         Analytics analytics = application.getAnalytics();
         Log.i("MainActivity", "Setting screen name: " + "main");
         analytics.reportScreen("Main Activity");
@@ -278,28 +286,29 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
         super.attachBaseContext(CalligraphyContextWrapper.wrap(newBase));
     }
 
-
     @Override
     public void onExportStarted(int numberOfItemsToExport) {
-        showExportedSnackBar(numberOfItemsToExport); // TODO: 09/09/16 Instead of calling this method, move logic to this callback ?
-        Log.d("Activity", "onExportStarted(): you might want to track this event");
+        //TODO: Replace string contats like this with String.format() instances
+        String stringBuilder = getString(R.string.activity_export_snackbar_1) + " " + numberOfItemsToExport + " " + getString(R.string.activity_export_snackbar_2);
+        SnackbarUtil.showSnackBar(content, stringBuilder, Snackbar.LENGTH_SHORT, String.valueOf(numberOfItemsToExport));
     }
 
     @Override
     public void onNoItemsToExport() {
-        showNoReadingsSnackBar(); // TODO: 09/09/16 Instead of calling this method, move logic to this callback ?
+        SnackbarUtil.showSnackBar(content, getResources()
+                .getString(R.string.activity_export_no_readings_snackbar), Snackbar.LENGTH_SHORT);
         Log.e("Activity", "onNoItemsToExport(): you might want to track this event");
     }
 
     @Override
     public void onExportFinish(Uri uri) {
-        showShareDialog(uri); // TODO: 09/09/16 Instead of calling this method, move logic to this callback ?
+        showShareDialog(uri); // TODO: Create Share Dialog Helper
         Log.e("Activity", "onExportFinish(): you might want to track this event");
     }
 
     @Override
     public void onExportError() {
-        showExportError(); // TODO: 09/09/16 Instead of calling this method, move logic to this callback ?
+        SnackbarUtil.showSnackBar(content, getString(R.string.activity_export_issue_generic), Snackbar.LENGTH_SHORT);
         Log.e("Activity", "onExportError(): you might want to track this event");
     }
 
@@ -309,6 +318,7 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
     }
 
     private void openDonateIntent() {
+        // TODO: Replace hardcoded string
         Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("http://www.glucosio.org/donate/"));
         startActivity(browserIntent);
     }
@@ -390,7 +400,7 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
                     if (activityExists) {
                         startActivity(emailIntent);
                     } else {
-                        showSnackBar(getResources().getString(R.string.menu_support_error1), Snackbar.LENGTH_LONG);
+                        showSnackBar(findViewById(android.R.id.content), getResources().getString(R.string.menu_support_error1), Snackbar.LENGTH_LONG);
                     }
                 } else {
                     // Forum
@@ -515,7 +525,7 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
                     exportPresenter.onExportClicked(exportAllButton.isChecked());
                     exportDialog.dismiss();
                 } else {
-                    showSnackBar(getResources().getString(R.string.dialog_error), Snackbar.LENGTH_LONG);
+                    showSnackBar(findViewById(android.R.id.content), getResources().getString(R.string.dialog_error), Snackbar.LENGTH_LONG);
                 }
             }
         });
@@ -575,7 +585,9 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
         return (Toolbar) findViewById(R.id.activity_main_toolbar);
     }
 
-    public LocaleHelper getLocaleHelper() { return localeHelper; }
+    public LocaleHelper getLocaleHelper() {
+        return localeHelper;
+    }
 
     private void hideFabAnimation() {
         final View fab = findViewById(R.id.activity_main_fab_add_reading);
@@ -622,52 +634,23 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
     }
 
     public void checkIfEmptyLayout() {
-        LinearLayout emptyLayout = (LinearLayout) findViewById(R.id.activity_main_empty_layout);
-        ViewPager pager = (ViewPager) findViewById(R.id.activity_main_pager);
-
         if (presenter.isdbEmpty()) {
-            pager.setVisibility(View.GONE);
+            viewPager.setVisibility(View.GONE);
             tabLayout.setVisibility(View.GONE);
             emptyLayout.setVisibility(View.VISIBLE);
 
             bottomSheetAddDialogView = getLayoutInflater().inflate(R.layout.fragment_add_bottom_dialog_disabled, null);
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                if (getResources().getConfiguration().orientation == 1) {
-                    // If Portrait choose vertical curved line
-                    ImageView arrow = (ImageView) findViewById(R.id.activity_main_arrow);
-                    arrow.setBackground(getResources().getDrawable(R.drawable.curved_line_vertical));
-                } else {
-                    // Else choose horizontal one
-                    ImageView arrow = (ImageView) findViewById(R.id.activity_main_arrow);
-                    arrow.setBackground((getResources().getDrawable(R.drawable.curved_line_horizontal)));
-                }
-            }
+            ImageView arrow = (ImageView) findViewById(R.id.activity_main_arrow);
+
+            @DrawableRes int drawableRes = getResources().getConfiguration()
+                    .orientation == 1 ? R.drawable.curved_line_vertical : R.drawable.curved_line_horizontal;
+            arrow.setBackground(AppCompatResources.getDrawable(this, drawableRes));
         } else {
-            pager.setVisibility(View.VISIBLE);
+            viewPager.setVisibility(View.VISIBLE);
             emptyLayout.setVisibility(View.GONE);
             bottomSheetAddDialogView = getLayoutInflater().inflate(R.layout.fragment_add_bottom_dialog, null);
         }
-    }
-
-    public void showExportedSnackBar(int nReadings) {
-        View rootLayout = findViewById(android.R.id.content);
-        Snackbar.make(rootLayout, getString(R.string.activity_export_snackbar_1) + " " + nReadings + " " + getString(R.string.activity_export_snackbar_2), Snackbar.LENGTH_SHORT).show();
-    }
-
-    public void showNoReadingsSnackBar() {
-        View rootLayout = findViewById(android.R.id.content);
-        Snackbar.make(rootLayout, getString(R.string.activity_export_no_readings_snackbar), Snackbar.LENGTH_SHORT).show();
-    }
-
-    public void showExportError() {
-        View rootLayout = findViewById(android.R.id.content);
-        Snackbar.make(rootLayout, getString(R.string.activity_export_issue_generic), Snackbar.LENGTH_SHORT).show();
-    }
-
-    private void showSnackBar(String text, int lengthLong) {
-        View rootLayout = findViewById(android.R.id.content);
-        Snackbar.make(rootLayout, text, lengthLong).show();
     }
 
     public void showShareDialog(Uri uri) {
